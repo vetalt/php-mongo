@@ -15,6 +15,14 @@ class Structure
         }
     }
     
+    public function reset()
+    {
+        $this->_data = array();
+        $this->_modifiedFields = array();
+        
+        return $this;
+    }
+    
     public function __get($name)
     {
         return isset($this->_data[$name]) ? $this->_data[$name] : null;
@@ -139,6 +147,8 @@ class Structure
      */
     public function set($selector, $value)
     {
+        $value = $this->_prepareValue($value);
+        
         // mark field as modified
         $this->_modifiedFields[] = $selector;
         
@@ -149,7 +159,6 @@ class Structure
         // optimize one-level selector search
         if(1 == $chunksNum) {
             $this->_data[$selector] = $value;
-            
             return $this;
         }
         
@@ -163,12 +172,68 @@ class Structure
             if(!isset($section[$field])) {
                 $section[$field] = array();
             }
+            elseif(!is_array($section[$field])) {
+                throw new Exception('Assigning subdocument to scalar value');
+            }
 
             $section = &$section[$field];
         }
         
         // update local field
         $section[$arraySelector[$chunksNum - 1]] = $value;
+        
+        return $this;
+    }
+    
+    private function _prepareValue($value)
+    {
+        if(is_array($value)) {
+            foreach($value as $k => $v) {
+                $value[$k] = $this->_prepareValue($v);
+            }
+        }
+        
+        // convert objects to arrays except internal mongo types
+        elseif(is_object($value)) {
+            if(!in_array(get_class($value), array('MongoId', 'MongoCode', 'MongoDate', 'MongoRegex', 'MongoBinData', 'MongoInt32', 'MongoInt64', 'MongoDBRef', 'MongoMinKey', 'MongoMaxKey', 'MongoTimestamp'))) {
+                $value = (array) $value;
+            }
+        }
+        
+        return $value;
+    }
+    
+    public function unsetField($selector)
+    {
+        // mark field as modified
+        $this->_modifiedFields[] = $selector;
+        
+        // modify
+        $arraySelector = explode('.', $selector);
+        $chunksNum = count($arraySelector);
+        
+        // optimize one-level selector search
+        if(1 == $chunksNum) {
+            unset($this->_data[$selector]);
+            return $this;
+        }
+        
+        // find section
+        $section = &$this->_data;
+
+        for($i = 0; $i < $chunksNum - 1; $i++) {
+
+            $field = $arraySelector[$i];
+
+            if(!isset($section[$field])) {
+                return $this;
+            }
+
+            $section = &$section[$field];
+        }
+        
+        // clone, unset in cloned and replace
+        unset($section[$arraySelector[$chunksNum - 1]]);
         
         return $this;
     }

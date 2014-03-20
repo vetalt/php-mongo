@@ -6,6 +6,12 @@ class QueryBuilder implements \Iterator, \Countable
 {
     /**
      *
+     * @var \Sokil\Mongo\Client
+     */
+    private $_client;
+    
+    /**
+     *
      * @var \Sokil\Mongo\Collection
      */
     private $_collection;
@@ -50,6 +56,8 @@ class QueryBuilder implements \Iterator, \Countable
     public function __construct(Collection $collection, array $options = null)
     {
         $this->_collection = $collection;
+        
+        $this->_client = $this->_collection->getDatabase()->getClient();
         
         if($options) {
             $this->_options = array_merge($this->_options, $options);
@@ -226,7 +234,7 @@ class QueryBuilder implements \Iterator, \Countable
         }
         
         $this->_cursor = $this->_collection
-            ->getNativeCollection()
+            ->getMongoCollection()
             ->find($this->_expression->toArray(), $this->_fields);
         
         
@@ -240,6 +248,15 @@ class QueryBuilder implements \Iterator, \Countable
         
         if($this->_sort) {
             $this->_cursor->sort($this->_sort);
+        }
+        
+        // log request
+        if($this->_client->hasLogger()) {
+            $this->_client->getLogger()->debug(get_class() . ': ' . json_encode(array(
+                'query'     => $this->_expression->toArray(),
+                'project'   => $this->_fields,
+                'sort'      => $this->_sort,
+            )));
         }
         
         $this->_cursor->rewind();
@@ -257,14 +274,14 @@ class QueryBuilder implements \Iterator, \Countable
     public function count()
     {
         return (int) $this->_collection
-            ->getNativeCollection()
+            ->getMongoCollection()
             ->count($this->_expression->toArray(), $this->_limit, $this->_skip);
     }
     
     public function findOne()
     {
         $documentData = $this->_collection
-            ->getNativeCollection()
+            ->getMongoCollection()
             ->findOne($this->_expression->toArray(), $this->_fields);
         
         if(!$documentData) {
@@ -278,7 +295,7 @@ class QueryBuilder implements \Iterator, \Countable
         $className = $this->_collection
             ->getDocumentClassName($documentData);
         
-        return new $className($documentData);
+        return new $className($this->_collection, $documentData);
     }
     
     /**
@@ -308,6 +325,11 @@ class QueryBuilder implements \Iterator, \Countable
             ->current();
     }
     
+    public function toArray()
+    {
+        return $this->_expression->toArray();
+    }
+    
     public function current()
     {
         $documentData = $this->getCursor()->current();
@@ -320,7 +342,7 @@ class QueryBuilder implements \Iterator, \Countable
         }
         
         $className = $this->_collection->getDocumentClassName($documentData);
-        return new $className($documentData);
+        return new $className($this->_collection, $documentData);
     }
     
     public function key()

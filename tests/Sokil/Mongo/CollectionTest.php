@@ -62,8 +62,10 @@ class CollectionTest extends \PHPUnit_Framework_TestCase
     
     public function testSaveValidNewDocument()
     {
+        $collection = self::$database->getCollection('phpmongo_test_collection');
+        
         // create document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array($collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -74,7 +76,6 @@ class CollectionTest extends \PHPUnit_Framework_TestCase
         $document->set('some-field-name', 'some-value');
         
         // save document
-        $collection = self::$database->getCollection('phpmongo_test_collection');
         $collection->saveDocument($document);
         
         $collection->delete();
@@ -103,8 +104,10 @@ class CollectionTest extends \PHPUnit_Framework_TestCase
      */
     public function testSaveInvalidNewDocument()
     {
+        $collection = self::$database->getCollection('phpmongo_test_collection');
+        
         // create document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array($collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -113,7 +116,7 @@ class CollectionTest extends \PHPUnit_Framework_TestCase
             )));
         
         // save document
-        $collection = self::$database->getCollection('phpmongo_test_collection');
+        
         $collection->saveDocument($document);
         
         $collection->delete();
@@ -149,5 +152,93 @@ class CollectionTest extends \PHPUnit_Framework_TestCase
             $this->assertArrayHasKey('k', $document->toArray());
         }
         
+    }
+    
+    public function testGetDistinct()
+    {
+        $collection = self::$database->getCollection('phpmongo_test_collection');
+    
+        // create documents
+        $collection
+            ->createDocument(array(
+                'k' => array(
+                    'f'     => 'F1',
+                    'kk'    => 'A',
+                )
+            ))
+            ->save();
+        
+        $collection
+            ->createDocument(array(
+                'k' => array(
+                    'f'     => 'F1',
+                    'kk'    => 'A',
+                )
+            ))
+            ->save();
+        
+        $collection
+            ->createDocument(array(
+                'k' => array(
+                    'f'     => 'F1',
+                    'kk'    => 'B',
+                )
+            ))
+            ->save();
+        
+        $collection
+            ->createDocument(array(
+                'k' => array(
+                    'f'     => 'F2',
+                    'kk'    => 'C',
+                )
+            ))
+            ->save();
+        
+        // get distinkt
+        $distinctValues = $collection
+            ->getDistinct('k.kk', $collection->expression()->where('k.f', 'F1'));
+        
+        $this->assertEquals(array('A', 'B'), $distinctValues);
+    }
+    
+    public function testInsertMultiple()
+    {
+        $collection = self::$database
+            ->getCollection('phpmongo_test_collection');
+        
+        $collection->insertMultiple(array(
+            array('a' => 1, 'b' => 2),
+            array('a' => 3, 'b' => 4),
+        ));
+        
+        $document = $collection->find()->where('a', 1)->findOne();
+        
+        $this->assertNotEmpty($document);
+        
+        $this->assertEquals(2, $document->b);
+    }
+    
+    /**
+     * @expectedException \Sokil\Mongo\Exception
+     * @expectedExceptionMessage ns not found
+     */
+    public function testValidateOnNotExistedCollection()
+    {
+        self::$database
+            ->getCollection('phpmongo_unexisted_collection')
+            ->validate(true);
+    }
+    
+    public function testValidateOnExistedCollection()
+    {
+        $collection = self::$database
+            ->getCollection('phpmongo_test_collection');
+        
+        $collection->createDocument(array('param' => 1))->save();
+       
+        $result = $collection->validate(true);
+        
+        $this->assertInternalType('array', $result);
     }
 }

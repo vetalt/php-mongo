@@ -1,7 +1,10 @@
+[![Build Status](https://travis-ci.org/sokil/php-mongo.png?branch=master)](https://travis-ci.org/sokil/php-mongo)
+[![Latest Stable Version](https://poser.pugx.org/sokil/php-mongo/v/stable.png)](https://packagist.org/packages/sokil/php-mongo)
+
 PHPMongo
 ========
 
-Wrapper to PECL Mongo driver
+Object Document Mapper for MongoDB
 
 Basic example
 -------

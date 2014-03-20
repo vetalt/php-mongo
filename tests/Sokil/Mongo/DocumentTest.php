@@ -127,6 +127,27 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals(array('c' => 'value2'), $document->get('a.b'));
         $this->assertEquals(array('b' => array('c' => 'value2')), $document->get('a'));
     }
+
+    public function testSetObject()
+    {
+        $obj = new \stdclass;
+        $obj->param = 'value';
+        
+        // save
+        $document = self::$collection->createDocument()
+            ->set('d', $obj)
+            ->save();
+        
+        $this->assertEquals(
+            (array) $obj, 
+            $document->d
+        );
+        
+        $this->assertEquals(
+            (array) $obj, 
+            self::$collection->getDocumentDirectly($document->getId())->d
+        );
+    }
     
     public function testSetDate()
     {
@@ -134,14 +155,134 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
         
         // save
         $document = self::$collection->createDocument()
-            ->set('d', $date);
+            ->set('d', $date)
+            ->save();
         
-        self::$collection->saveDocument($document);
+        $this->assertEquals(
+            $date, 
+            $document->d
+        );
         
-        //read
-        $document = self::$collection->getDocument($document->getId());
+        $this->assertEquals(
+            $date, 
+            self::$collection->getDocumentDirectly($document->getId())->d
+        );
+    }
+    
+    /**
+     * @expectedException \Sokil\Mongo\Exception
+     */
+    public function testSetArrayToScalarOnNewDoc()
+    {
+        $doc = self::$collection->createDocument(array(
+            'a' => 1,
+        ));
         
-        $this->assertEquals($date, $document->get('d'));
+        $doc->set('a.b', 2);
+        $this->assertEquals(array('a' => array('b' => 2)), $doc->toArray());
+    }
+    
+    public function testSetMongoCode()
+    {
+        $doc = self::$collection->createDocument(array(
+            'code'  => new \MongoCode('Math.sin(45);'),
+        ))->save();
+        
+        $this->assertInstanceOf(
+            '\MongoCode',
+            self::$collection->getDocumentDirectly($doc->getId())->code
+        );
+    }
+    
+    public function testSetMongoRegex()
+    {
+        $doc = self::$collection->createDocument(array(
+            'code'  => new \MongoRegex('/[a-z]/'),
+        ))->save();
+        
+        $this->assertInstanceOf(
+            '\MongoRegex',
+            self::$collection->getDocumentDirectly($doc->getId())->code
+        );
+    }
+    
+    /**
+     * @expectedException \Sokil\Mongo\Exception
+     */
+    public function testSetArrayToScalarOnExistedDoc()
+    {
+        $doc = self::$collection
+            ->createDocument(array(
+                'a' => 1,
+            ))
+            ->save();
+        
+        $doc->set('a.b', 2)->save();
+    }
+        
+    public function testUnsetInNewDocument()
+    {
+        $doc = self::$collection->createDocument(array(
+            'a' => array(
+                'a1'    => array(
+                    'a11'   => 1,
+                    'a12'   => 2,
+                ),
+                'a2'    => array(
+                    'a21'   => 1,
+                    'a22'   => 2,
+                ),
+            )
+        ));
+        
+        $doc->unsetField('a.a2.a21');
+        
+        $this->assertEquals(array(
+            'a' => array(
+                'a1'    => array(
+                    'a11'   => 1,
+                    'a12'   => 2,
+                ),
+                'a2'    => array(
+                    'a22'   => 2,
+                ),
+            )
+        ), $doc->toArray());
+    }
+    
+    public function testUnsetInExistedDocument()
+    {
+        $doc = self::$collection
+            ->createDocument(array(
+                'a' => array(
+                    'a1'    => array(
+                        'a11'   => 1,
+                        'a12'   => 2,
+                    ),
+                    'a2'    => array(
+                        'a21'   => 1,
+                        'a22'   => 2,
+                    ),
+                )
+            ))
+            ->save();
+        
+        $doc->unsetField('a.a2.a21')->save();
+        
+        $data = $doc->toArray();
+        unset($data['_id']);
+        
+        $this->assertEquals(array(
+            'a' => array(
+                'a1'    => array(
+                    'a11'   => 1,
+                    'a12'   => 2,
+                ),
+                'a2'    => array(
+                    'a22'   => 2,
+                ),
+            )
+        ), $data);
     }
     
     public function testAppend()
@@ -172,7 +313,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_RequiredField()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -191,7 +332,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldEquals()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -214,7 +355,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldNotEquals()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -237,7 +378,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldInRange()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -260,7 +401,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_NumericField()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -283,7 +424,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_NullField()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -306,7 +447,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldEqualsOnScenario()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -330,7 +471,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldEqualsExceptScenario()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -361,7 +502,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldRegexp()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -384,7 +525,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testIsValid_FieldEmail()
     {
         // mock of document
-        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'));
+        $document = $this->getMock('\Sokil\Mongo\Document', array('rules'), array(self::$collection));
         $document
             ->expects($this->any())
             ->method('rules')
@@ -414,52 +555,140 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
         
     }
     
-    public function testIncrement()
+    /**
+     * @covers \Sokil\Mongo\Document::increment
+     */
+    public function testIncrementNotExistedKeyOfUnsavedDocument()
     {
-        // create document
-        $doc = self::$collection->createDocument(array('i' => 1));
+        /**
+         * Increment unsaved
+         */
+        $doc = self::$collection
+            ->createDocument(array('i' => 1));
         
-        // increment unsaved
+        // increment
+        $doc->increment('j', 2);
+        $doc->increment('j', 4);
+        
+        // test
+        $this->assertEquals(6, $doc->get('j'));
+        
+        // save
+        $doc->save();
+        
+        /**
+         * Test increment of document in cache
+         */
+        $doc = self::$collection->getDocument($doc->getId());
+        $this->assertEquals(6, $doc->get('j'));
+        
+        /**
+         * Test increment after reread from db
+         */
+        $doc = self::$collection->getDocumentDirectly($doc->getId());
+        $this->assertEquals(6, $doc->get('j'));
+    }
+    
+    /**
+     * @covers \Sokil\Mongo\Document::increment
+     */
+    public function testIncrementNotExistedKeyOfSavedDocument()
+    {
+        $doc = self::$collection
+            ->createDocument(array('i' => 1))
+            ->save();
+        
+        /**
+         * Increment saved
+         */
+        $doc->increment('j', 2); // existed key
+        $doc->increment('j', 4);
+        
+        // test
+        $this->assertEquals(6, $doc->get('j'));
+        
+        // save
+        $doc->save();
+        
+        /**
+         * Test increment of document in cache
+         */
+        $doc = self::$collection->getDocument($doc->getId());
+        $this->assertEquals(6, $doc->get('j'));
+        
+        /**
+         * Test increment after reread from db
+         */
+        $doc = self::$collection->getDocumentDirectly($doc->getId());
+        $this->assertEquals(6, $doc->get('j'));
+    }
+    
+    /**
+     * @covers \Sokil\Mongo\Document::increment
+     */
+    public function testIncrementExistedKeyOfUnsavedDocument()
+    {
+        /**
+         * Increment unsaved
+         */
+        $doc = self::$collection
+            ->createDocument(array('i' => 1));
+        
+        // increment
         $doc->increment('i', 2);
         $doc->increment('i', 4);
-        $doc->set('j', 8);
         
-        // test unsaved
+        // test
         $this->assertEquals(7, $doc->get('i'));
-        $this->assertEquals(8, $doc->get('j'));
         
         // save
-        self::$collection->saveDocument($doc);
+        $doc->save();
         
-        // test saved
+        /**
+         * Test increment of document in cache
+         */
         $doc = self::$collection->getDocument($doc->getId());
-        
         $this->assertEquals(7, $doc->get('i'));
-        $this->assertEquals(8, $doc->get('j'));
         
-        // increment saved
-        $doc->increment('i', 16); // existed key
-        $doc->increment('i', 32);
+        /**
+         * Test increment after reread from db
+         */
+        $doc = self::$collection->getDocumentDirectly($doc->getId());
+        $this->assertEquals(7, $doc->get('i'));
+    }
+    
+    /**
+     * @covers \Sokil\Mongo\Document::increment
+     */
+    public function testIncrementExistedKeyOfSavedDocument()
+    {
+        $doc = self::$collection
+            ->createDocument(array('i' => 1))
+            ->save();
         
-        $doc->increment('j', 64); // unexisted key
-        $doc->increment('j', 128);
+        /**
+         * Increment saved
+         */
+        $doc->increment('i', 2); // existed key
+        $doc->increment('i', 4);
         
-        $doc->set('k', 256); // set new key
-        
-        // test unsaved
-        $this->assertEquals(55, $doc->get('i'));
-        $this->assertEquals(200, $doc->get('j'));
-        $this->assertEquals(256, $doc->get('k'));
+        // test
+        $this->assertEquals(7, $doc->get('i'));
         
         // save
-        self::$collection->saveDocument($doc);
+        $doc->save();
         
-        // test saved
+        /**
+         * Test increment of document in cache
+         */
         $doc = self::$collection->getDocument($doc->getId());
+        $this->assertEquals(7, $doc->get('i'));
         
-        $this->assertEquals(55, $doc->get('i'));
-        $this->assertEquals(200, $doc->get('j'));
-        $this->assertEquals(256, $doc->get('k'));
+        /**
+         * Test increment after reread from db
+         */
+        $doc = self::$collection->getDocumentDirectly($doc->getId());
+        $this->assertEquals(7, $doc->get('i'));
     }
     
     public function testPushNumberToEmptyOnExistedDocument()
@@ -478,7 +707,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
         
         $this->assertEquals(array(1, 2), self::$collection->getDocument($doc->getId())->key);
     }
-    
+
     public function testPushObjectToEmptyOnExistedDocument()
     {
         // create document
@@ -503,8 +732,29 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
         
         $this->assertEquals(
             array((array)$object1, (array)$object2), 
-            self::$collection->getDocument($doc->getId())->key
+            self::$collection->getDocumentDirectly($doc->getId())->key
         );
+    }
+    
+    public function testPushMongoIdToEmptyOnExistedDocument()
+    {
+        // create document
+        $doc = self::$collection
+            ->createDocument(array(
+                'some' => 'some',
+            ))
+            ->save();
+        
+        $id = new \MongoId;
+        
+        // push single to empty
+        $doc
+            ->push('key', $id)
+            ->save();
+        
+        $this->assertEquals(array($id), $doc->key);
+        
+        $this->assertEquals(array($id), self::$collection->getDocumentDirectly($doc->getId())->key);
     }
     
     public function testPushArrayToEmptyOnExistedDocument()
@@ -832,7 +1082,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
     public function testTriggerError()
     {
         try {
-            $document = new \Sokil\Mongo\Document;
+            $document = new \Sokil\Mongo\Document(self::$collection);
             $document->triggerError('field', 'rule', 'message');
             
             $document->validate();
@@ -859,7 +1109,7 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
         );
         
         try {
-            $document = new \Sokil\Mongo\Document;
+            $document = new \Sokil\Mongo\Document(self::$collection);
             $document->triggerErrors($errors);
             
             $document->validate();
@@ -915,5 +1165,14 @@ class DocumentTest extends \PHPUnit_Framework_TestCase
             'a1'    => 'av1',
             'a2'    => 'av2',
         ), $foundDocumentData);
+    }
+    
+    public function testExecuteBehavior()
+    {
+        $document = self::$collection->createDocument(array('param' => 0));
+        
+        $document->attachBehavior('get42', new \Sokil\Mongo\DocumentTest\SomeBehavior());
+        
+        $this->assertEquals(42, $document->return42());
     }
 }

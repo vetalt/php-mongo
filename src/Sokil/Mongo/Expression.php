@@ -37,6 +37,16 @@ class Expression
         ));
     }
     
+    public function whereNotEmpty($field)
+    {
+        return $this->where('$nor', array(
+            array($field => null),
+            array($field => ''),
+            array($field => array()),
+            array($field => array('$exists' => false))
+        ));
+    }
+    
     public function whereGreater($field, $value)
     {
         return $this->where($field, array('$gt' => $value));
@@ -170,6 +180,11 @@ class Expression
     public function whereElemMatch($field, Expression $expression)
     {
         return $this->where($field, array('$elemMatch' => $expression->toArray()));
+    }
+    
+    public function whereElemNotMatch($field, Expression $expression)
+    {
+        return $this->whereNot($this->expression()->whereElemMatch($field, $expression));
     }
     
     public function whereArraySize($field, $length)

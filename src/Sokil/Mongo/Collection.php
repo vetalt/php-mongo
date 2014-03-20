@@ -10,33 +10,53 @@ class Collection
     
     /**
      *
+     * @var \Sokil\Mongo\Database
+     */
+    private $_database;
+    
+    private $_collectionName;
+    
+    /**
+     *
      * @var \MongoCollection
      */
-    private $_collection;
+    private $_mongoCollection;
     
     private $_documentsPool = array();
     
-    public function __construct(\MongoCollection $collection)
+    public function __construct(Database $database, $collectionName)
     {
-        $this->_collection = $collection;
+        $this->_database = $database;
+        $this->_collectionName = $collectionName;
+        
+        $this->_mongoCollection = $database->getMongoDB()->selectCollection($collectionName);
     }
     
     /**
      * 
      * @return MongoCollection
      */
-    public function getNativeCollection()
+    public function getMongoCollection()
     {
-        return $this->_collection;
+        return $this->_mongoCollection;
+    }
+    
+    /**
+     * 
+     * @return \Sokil\Mongo\Database
+     */
+    public function getDatabase()
+    {
+        return $this->_database;
     }
     
     public function delete() {
-        $status = $this->_collection->drop();
+        $status = $this->_mongoCollection->drop();
         if($status['ok'] != 1) {
             // check if collection exists
             if('ns not found' !== $status['errmsg']) {
                 // collection exist
-                throw new Exception('Error deleting collection ' . $this->_collection->getName());
+                throw new Exception('Error deleting collection ' . $this->_mongoCollection->getName());
             }
         }
         
@@ -63,7 +83,7 @@ class Collection
     {
         $className = $this->getDocumentClassName($data);
         
-        return new $className($data);
+        return new $className($this, $data);
     }
     
     /**
@@ -76,6 +96,22 @@ class Collection
         return new $this->_queryBuliderClass($this, array(
             'expressionClass'   => $this->_queryExpressionClass,
         ));
+    }
+    
+    /**
+     * Retrieve a list of distinct values for the given key across a collection.
+     * 
+     * @param string $selector field selector
+     * @param \Sokil\Mongo\Expression $expression expression to search documents
+     * @return array distinct values
+     */
+    public function getDistinct($selector, Expression $expression = null)
+    {
+        if($expression) {
+            $expression = $expression->toArray();
+        }
+        
+        return $this->_mongoCollection->distinct($selector, $expression);
     }
     
     public function expression()
@@ -177,7 +213,7 @@ class Collection
                 
                 $updateOperations = $document->getOperator()->getAll();
                 
-                $status = $this->_collection->update(
+                $status = $this->_mongoCollection->update(
                     array('_id' => $document->getId()),
                     $updateOperations
                 );
@@ -187,14 +223,14 @@ class Collection
                 }
                 
                 if($document->getOperator()->isReloadRequired()) {
-                    $data = $this->_collection->findOne(array('_id' => $document->getId()));
+                    $data = $this->_mongoCollection->findOne(array('_id' => $document->getId()));
                     $document->fromArray($data);
                 }
                 
                 $document->getOperator()->reset();
             }
             else {
-                $status = $this->_collection->update(
+                $status = $this->_mongoCollection->update(
                     array('_id' => $document->getId()),
                     $document->toArray()
                 );
@@ -214,7 +250,7 @@ class Collection
             $data = $document->toArray();
             
             // save data
-            $status = $this->_collection->insert($data);
+            $status = $this->_mongoCollection->insert($data);
             if($status['ok'] != 1) {
                 throw new Exception('Insert error: ' . $status['err']);
             }
@@ -242,7 +278,7 @@ class Collection
     {        
         $document->triggerEvent('beforeDelete');
         
-        $status = $this->_collection->remove(array(
+        $status = $this->_mongoCollection->remove(array(
             '_id'   => $document->getId()
         ));
         
@@ -258,13 +294,35 @@ class Collection
         return $this;
     }
     
+    public function insertMultiple($rows)
+    {
+        $document = $this->createDocument();
+        
+        foreach($rows as $row) {
+            $document->fromArray($row);
+            
+            if(!$document->isValid()) {
+                throw new Exception('Document invalid');
+            }
+            
+            $document->reset();
+        }
+        
+        $result = $this->_mongoCollection->batchInsert($rows);
+        if(!$result || $result['ok'] != 1) {
+            throw new Exception('Batch insert error: ' . $result['err']);
+        }
+        
+        return $this;
+    }
+    
     public function updateMultiple(Expression $expression, $updateData)
     {
         if($updateData instanceof Operator) {
             $updateData = $updateData->getAll();
         }
         
-        $status = $this->_collection->update(
+        $status = $this->_mongoCollection->update(
             $expression->toArray(), 
             $updateData,
             array(
@@ -285,7 +343,7 @@ class Collection
      * @return \Sokil\Mongo\AggregatePipelines
      */
     public function createPipeline() {
-        return new AggregatePipelines;
+        return new AggregatePipelines($this);
     }
     
     /**
@@ -304,7 +362,7 @@ class Collection
             throw new Exception('Wrong pipelines specified');
         }
         
-        $status = $this->_collection->aggregate($pipelines);
+        $status = $this->_mongoCollection->aggregate($pipelines);
         
         if($status['ok'] != 1) {
             throw new Exception($status['errmsg']);
@@ -313,33 +371,43 @@ class Collection
         return $status['result'];
     }
     
+    public function validate($full = false)
+    {
+        $response = $this->_mongoCollection->validate($full);
+        if(!$response || $response['ok'] != 1) {
+            throw new Exception($response['errmsg']);
+        }
+        
+        return $response;
+    }
+    
     public function readPrimaryOnly()
     {
-        $this->_collection->setReadPreference(\MongoClient::RP_PRIMARY);
+        $this->_mongoCollection->setReadPreference(\MongoClient::RP_PRIMARY);
         return $this;
     }
     
     public function readPrimaryPreferred(array $tags = null)
     {
-        $this->_collection->setReadPreference(\MongoClient::RP_PRIMARY_PREFERRED, $tags);
+        $this->_mongoCollection->setReadPreference(\MongoClient::RP_PRIMARY_PREFERRED, $tags);
         return $this;
     }
     
     public function readSecondaryOnly(array $tags = null)
     {
-        $this->_collection->setReadPreference(\MongoClient::RP_SECONDARY, $tags);
+        $this->_mongoCollection->setReadPreference(\MongoClient::RP_SECONDARY, $tags);
         return $this;
     }
     
     public function readSecondaryPreferred(array $tags = null)
     {
-        $this->_collection->setReadPreference(\MongoClient::RP_SECONDARY_PREFERRED, $tags);
+        $this->_mongoCollection->setReadPreference(\MongoClient::RP_SECONDARY_PREFERRED, $tags);
         return $this;
     }
     
     public function readNearest(array $tags = null)
     {
-        $this->_collection->setReadPreference(\MongoClient::RP_NEAREST, $tags);
+        $this->_mongoCollection->setReadPreference(\MongoClient::RP_NEAREST, $tags);
         return $this;
     }
 }

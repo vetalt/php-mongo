@@ -2,6 +2,10 @@
 
 namespace Sokil\Mongo;
 
+use \Symfony\Component\EventDispatcher\EventDispatcher;
+
+use Sokil\Mongo\Behavior;
+
 class Document extends Structure
 {
     const FIELD_TYPE_DOUBLE                   = 1;
@@ -23,6 +27,12 @@ class Document extends Structure
     const FIELD_TYPE_INT64                    = 18;
     const FIELD_TYPE_MIN_KEY                  = 255;
     const FIELD_TYPE_MAX_KEY                  = 127;
+
+    /**
+     *
+     * @var \Sokil\Mongo\Collection
+     */
+    private $_collection;
     
     protected $_scenario;
     
@@ -30,15 +40,15 @@ class Document extends Structure
      *
      * @var array validator errors
      */
-    private $_errors = array();
+    private $_errors;
     
     /**
      *
      * @var array manually added validator errors
      */
-    private $_triggeredErors = array();
+    private $_triggeredErors;
     
-    private $_events = array();
+    private $_eventDispatcher;
     
     /**
      *
@@ -46,100 +56,119 @@ class Document extends Structure
      */
     private $_operator;
     
-    public function __construct(array $data = null)
-    {    
-        $this->beforeConstruct();   
+    private $_behaviors;
+    
+    public function __construct(Collection $collection, array $data = null)
+    {
+        $this->_collection = $collection;
+        
+        $this->reset();
+        
+        $this->beforeConstruct();
         
         parent::__construct($data);
         
-        $this->_operator = new Operator;
-        
-        $this->triggerEvent('afterConstruct');
+        $this->_eventDispatcher->dispatch('afterConstruct');
     }
     
     public function beforeConstruct() {}
+    
+        
+    public function reset()
+    {
+        parent::reset();
+        
+        $this->_eventDispatcher = new EventDispatcher;
+        $this->_operator        = new Operator;
+        $this->_errors          = array();
+        $this->_triggeredErors  = array();
+        
+        $this->_behaviors       = array();
+        $this->attachBehaviors($this->behaviors());
+        
+        return $this;
+    }
     
     public function __toString()
     {
         return (string) $this->getId();
     }
     
-    public function attachEvent($event, $handler)
-    {
-        $this->_events[$event][] = $handler;
-        return $this;
+    public function __call($name, $arguments) {
+        
+        // behaviors
+        foreach($this->_behaviors as $behavior) {
+            if(!method_exists($behavior, $name)) {
+                continue;
+            }
+            
+            return call_user_func_array(array($behavior, $name), $arguments);
+        }
     }
     
     public function triggerEvent($event)
     {
-        if(empty($this->_events[$event])) {
-            return $this;
-        }
-        
-        foreach($this->_events[$event] as $handler) {
-            call_user_func($handler);
-        }
-        
+        $this->_eventDispatcher->dispatch($event);
         return $this;
     }
     
-    public function onBeforeConstruct($handler) 
+    public function attachEvent($event, $handler)
     {
-        $this->_events['beforeConstruct'][] = $handler;
+        $this->_eventDispatcher->addListener($event, $handler);
         return $this;
     }
     
     public function onAfterConstruct($handler)
     {
-        $this->_events['afterConstruct'][] = $handler;
+        $this->_eventDispatcher->addListener('afterConstruct', $handler);
         return $this;
     }
     
     public function onBeforeInsert($handler)
     {
-        $this->_events['beforeInsert'][] = $handler;
+        $this->_eventDispatcher->addListener('beforeInsert', $handler);
         return $this;
     }
     
     public function onAfterInsert($handler)
     {
-        $this->_events['afterInsert'][] = $handler;
+        $this->_eventDispatcher->addListener('afterInsert', $handler);
         return $this;
     }
     
     public function onBeforeUpdate($handler)
     {
-        $this->_events['beforeUpdate'][] = $handler;
+        $this->_eventDispatcher->addListener('beforeUpdate', $handler);
         return $this;
     }
     
     public function onAfterUpdate($handler)
     {
-        $this->_events['afterUpdate'][] = $handler;
+        $this->_eventDispatcher->addListener('afterUpdate', $handler);
         return $this;
     }
     
     public function onBeforeSave($handler)
     {
-        $this->_events['beforeSave'][] = $handler;
+        $this->_eventDispatcher->addListener('beforeSave', $handler);
         return $this;
     }
     
     public function onAfterSave($handler)
     {
-        $this->_events['afterSave'][] = $handler;
+        $this->_eventDispatcher->addListener('afterSave', $handler);
         return $this;
     }
     
     public function onBeforeDelete($handler)
     {
-        $this->_events['beforeDelete'][] = $handler;
+        $this->_eventDispatcher->addListener('beforeDelete', $handler);
         return $this;
     }
     
     public function onAfterDelete($handler)
     {
-        $this->_events['afterDelete'][] = $handler;
+        $this->_eventDispatcher->addListener('afterDelete', $handler);
         return $this;
     }
     
@@ -418,6 +447,39 @@ class Document extends Structure
         return $this;
     }
     
+    public function behaviors()
+    {
+        return array();
+    }
+    
+    public function attachBehaviors(array $behaviors)
+    {
+        foreach($behaviors as $name => $behavior) {
+            
+            if(!($behavior instanceof Behavior)) {
+                if(empty($behavior['class'])) {
+                    throw new Exception('Behavior class not specified');
+                }
+
+                $className = $behavior['class'];
+                unset($behavior['class']);
+
+                $behavior = new $className($behavior);
+            }
+            
+            $this->attachBehavior($name, $behavior);
+        }
+        
+        return $this;
+    }
+    
+    public function attachBehavior($name, Behavior $behavior)
+    {
+        $this->_behaviors[$name] = $behavior;
+        
+        return $this;
+    }
+    
     public function getOperator()
     {
         return $this->_operator;
@@ -437,6 +499,17 @@ class Document extends Structure
         // if document saved - save through update
         if($this->getId()) {
             $this->_operator->set($fieldName, $value);
+        }
+        
+        return $this;
+    }
+    
+    public function unsetField($fieldName)
+    {
+        parent::unsetField($fieldName);
+        
+        if($this->getId()) {
+            $this->_operator->unsetField($fieldName);
         }
         
         return $this;
@@ -482,10 +555,6 @@ class Document extends Structure
             $value = $value->toArray();
         }
         
-        if(is_object($value)) {
-            $value = (array) $value;
-        }
-        
         // field not exists
         if(!$oldValue) {
             if($this->getId()) {
@@ -519,6 +588,8 @@ class Document extends Structure
         
         // update local data
         parent::set($fieldName, $value);
+        
+        return $this;
     }
     
     /**
@@ -588,5 +659,16 @@ class Document extends Structure
     public function decrement($fieldName, $value = 1)
     {
         return $this->increment($fieldName, -1 * $value);
+    }
+    
+    public function save($validate = true)
+    {
+        $this->_collection->saveDocument($this, $validate);
+        return $this;
+    }
+    
+    public function delete()
+    {
+        $this->_collection->deleteDocument($this);
     }
 }
