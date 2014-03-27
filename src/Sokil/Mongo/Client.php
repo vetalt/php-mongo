@@ -196,4 +196,30 @@ class Client
     {
         return (bool) $this->_logger;
     }
+    
+    public function setWriteConcern($w, $timeout)
+    {
+        if(!$this->getConnection()->setWriteConcern($w, (int) $timeout)) {
+            throw new Exception('Error setting write concern');
+        }
+        
+        return $this;
+    }
+    
+    public function setUnacknowledgedWriteConcern($timeout)
+    {
+        $this->setWriteConcern(0, (int) $timeout);
+        return $this;
+    }
+    
+    public function setMajorityWriteConcern($timeout)
+    {
+        $this->setWriteConcern('majority', (int) $timeout);
+        return $this;
+    }
+    
+    public function getWriteConcern()
+    {
+        return $this->getConnection()->getWriteConcern();
+    }
 }

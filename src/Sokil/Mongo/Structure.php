@@ -6,18 +6,23 @@ class Structure
 {
     protected $_data = array();
     
+    protected $_originalData = array();
+    
     protected $_modifiedFields = array();
     
     public function __construct(array $data = null)
     {
         if($data) {
-            $this->fromArray($data);
+            $this->_mergeUnmodified($this->_data, $data);
         }
+        
+        $this->_originalData = $this->_data;
+        
     }
     
     public function reset()
     {
-        $this->_data = array();
+        $this->_data = $this->_originalData;
         $this->_modifiedFields = array();
         
         return $this;
@@ -73,7 +78,7 @@ class Structure
             throw new Exception('Wring structure class specified');
         }
         
-        return clone $structure->fromArray($data);
+        return clone $structure->merge($data);
     }
     
     /**
@@ -100,7 +105,7 @@ class Structure
             }
 
             return array_map(function($dataItem) use($structure) {
-                return clone $structure->fromArray($dataItem);
+                return clone $structure->merge($dataItem);
             }, $data);
         }
         
@@ -119,7 +124,7 @@ class Structure
                     }
                 }
                 
-                return clone $structurePool[$classNameString]->fromArray($dataItem);
+                return clone $structurePool[$classNameString]->merge($dataItem);
             }, $data);
         }
         
@@ -148,17 +153,22 @@ class Structure
     public function set($selector, $value)
     {
         $value = $this->_prepareValue($value);
-        
-        // mark field as modified
-        $this->_modifiedFields[] = $selector;
-        
+
         // modify
         $arraySelector = explode('.', $selector);
         $chunksNum = count($arraySelector);
         
         // optimize one-level selector search
         if(1 == $chunksNum) {
-            $this->_data[$selector] = $value;
+            
+            // update only if new value different from current
+            if(!isset($this->_data[$selector]) || $this->_data[$selector] !== $value) {
+                // modify
+                $this->_data[$selector] = $value;
+                // mark field as modified
+                $this->_modifiedFields[] = $selector;
+            }
+        
             return $this;
         }
         
@@ -179,10 +189,30 @@ class Structure
             $section = &$section[$field];
         }
         
-        // update local field
-        $section[$arraySelector[$chunksNum - 1]] = $value;
+        // update only if new value different from current
+        if(!isset($section[$arraySelector[$chunksNum - 1]]) || $section[$arraySelector[$chunksNum - 1]] !== $value) {
+            // modify
+            $section[$arraySelector[$chunksNum - 1]] = $value;
+            // mark field as modified
+            $this->_modifiedFields[] = $selector;
+        }
         
         return $this;
+    }
+    
+    public function has($selector)
+    {
+        $pointer = &$this->_data;
+        
+        foreach(explode('.', $selector) as $field) {
+            if(!isset($pointer[$field])) {
+                return false;
+            }
+            
+            $pointer = &$pointer[$field];
+        }
+        
+        return true;
     }
     
     private function _prepareValue($value)
@@ -205,16 +235,20 @@ class Structure
     
     public function unsetField($selector)
     {
-        // mark field as modified
-        $this->_modifiedFields[] = $selector;
-        
         // modify
         $arraySelector = explode('.', $selector);
         $chunksNum = count($arraySelector);
         
         // optimize one-level selector search
         if(1 == $chunksNum) {
-            unset($this->_data[$selector]);
+            // check if field exists
+            if(isset($this->_data[$selector])) {
+                // unset field
+                unset($this->_data[$selector]);
+                // mark field as modified
+                $this->_modifiedFields[] = $selector;
+            }
+            
             return $this;
         }
         
@@ -232,8 +266,13 @@ class Structure
             $section = &$section[$field];
         }
         
-        // clone, unset in cloned and replace
-        unset($section[$arraySelector[$chunksNum - 1]]);
+        // check if field exists
+        if(isset($section[$arraySelector[$chunksNum - 1]])) {
+            // unset field
+            unset($section[$arraySelector[$chunksNum - 1]]);
+            // mark field as modified
+            $this->_modifiedFields[] = $selector;
+        }
         
         return $this;
     }
@@ -288,10 +327,53 @@ class Structure
         return $this->_data;
     }
     
-    public function fromArray(array $data)
+    
+    /**
+     * Recursive function to merge data without setting modification mark
+     * 
+     * @param type $target
+     * @param type $source
+     */
+    private function _mergeUnmodified(&$target, $source) 
     {
-        $this->_data = array_merge($this->_data, $data);
-        
+        foreach($source as $key => $value) {
+            if(is_array($value) && isset($target[$key])) {
+                $this->_mergeUnmodified($target[$key], $value);
+            }
+            else {
+                $target[$key] = $value;
+            }
+        }
+    }
+    
+    /**
+     * Recursive function to merge data with setting modification mark
+     * 
+     * @param type $target
+     * @param type $source
+     */
+    private function _merge(&$target, $source, $prefix = null) 
+    {
+        foreach($source as $key => $value) {
+            if(is_array($value) && isset($target[$key])) {
+                $this->_merge($target[$key], $value, $prefix . $key . '.');
+            }
+            else {
+                $target[$key] = $value;
+                $this->_modifiedFields[] = $prefix . $key;
+            }
+        }
+    }
+    
+    /**
+     * Merge array to current structure
+     * 
+     * @param array $data
+     * @return \Sokil\Mongo\Structure
+     */
+    public function merge(array $data)
+    {
+        $this->_merge($this->_data, $data);
         return $this;
     }
 }

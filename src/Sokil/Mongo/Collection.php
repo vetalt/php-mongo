@@ -381,6 +381,31 @@ class Collection
         return $response;
     }
     
+    public function ensureIndex($key, array $options = array())
+    {
+        $this->_mongoCollection->ensureIndex($key, $options);
+        return $this;
+    }
+    
+    public function ensureUniqueIndex($key, $dropDups = false)
+    {
+        $this->_mongoCollection->ensureIndex($key, array(
+            'unique'    => true,
+            'dropDups'  => (bool) $dropDups,
+        ));
+        
+        return $this;
+    }
+    
+    public function ensureSparseIndex($key)
+    {
+        $this->_mongoCollection->ensureIndex($key, array(
+            'sparse'    => true,
+        ));
+        
+        return $this;
+    }
+    
     public function readPrimaryOnly()
     {
         $this->_mongoCollection->setReadPreference(\MongoClient::RP_PRIMARY);
@@ -409,5 +434,31 @@ class Collection
     {
         $this->_mongoCollection->setReadPreference(\MongoClient::RP_NEAREST, $tags);
         return $this;
+    }
+    
+    public function setWriteConcern($w, $timeout)
+    {
+        if(!$this->_mongoCollection->setWriteConcern($w, (int) $timeout)) {
+            throw new Exception('Error setting write concern');
+        }
+        
+        return $this;
+    }
+    
+    public function setUnacknowledgedWriteConcern($timeout)
+    {
+        $this->setWriteConcern(0, (int) $timeout);
+        return $this;
+    }
+    
+    public function setMajorityWriteConcern($timeout)
+    {
+        $this->setWriteConcern('majority', (int) $timeout);
+        return $this;
+    }
+    
+    public function getWriteConcern()
+    {
+        return $this->_mongoCollection->getWriteConcern();
     }
 }

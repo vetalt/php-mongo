@@ -51,7 +51,7 @@ class StructureTest extends \PHPUnit_Framework_TestCase
     public function testSetArrayToScalar()
     {
         $structure = new Structure;
-        $structure->fromArray(array(
+        $structure->merge(array(
             'a' => 1,
         ));
         
@@ -61,7 +61,7 @@ class StructureTest extends \PHPUnit_Framework_TestCase
     public function testUnset()
     {
         $structure = new Structure;
-        $structure->fromArray(array(
+        $structure->merge(array(
             'a' => array(
                 'a1'    => array(
                     'a11'   => 1,
@@ -234,5 +234,38 @@ class StructureTest extends \PHPUnit_Framework_TestCase
         $this->assertFalse($structure->isModified('param3-unex.subparam1'));
         $this->assertFalse($structure->isModified('param3.subparam1-unex'));
         $this->assertFalse($structure->isModified('param3.subparam1.subparam-unex'));
+    }
+    
+    public function testIsModifiedIfValueSame()
+    {
+        $structure = new \Sokil\Mongo\Structure(array(
+            'param1'    => array(
+                'param2'    => 'value2',
+            )
+        ));
+        
+        $structure->setNotModified();
+        
+        $structure->set('param1.param2', 'value2');
+        
+        $this->assertFalse($structure->isModified('param1.param2'));
+    }
+    
+    /**
+     * @covers \Sokil\Mongo\Structure::has
+     */
+    public function testHas()
+    {
+        $structure = new Structure(array(
+            'param1'    => array(
+                'param2'    => 'value2',
+            )
+        ));
+        
+        $this->assertTrue($structure->has('param1'));
+        $this->assertTrue($structure->has('param1.param2'));
+        
+        $this->assertFalse($structure->has('paramNONE'));
+        $this->assertFalse($structure->has('paramNONE.param2'));
     }
 }

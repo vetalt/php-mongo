@@ -27,7 +27,13 @@ class Document extends Structure
     const FIELD_TYPE_INT64                    = 18;
     const FIELD_TYPE_MIN_KEY                  = 255;
     const FIELD_TYPE_MAX_KEY                  = 127;
+    
+    const RELATION_HAS_ONE      = 'HAS_ONE';
+    const RELATION_BELONGS      = 'BELONGS';
+    const RELATION_HAS_MANY     = 'HAS_MANY';
 
+    private $_resolvedRelations = array();
+    
     /**
      *
      * @var \Sokil\Mongo\Collection
@@ -40,13 +46,13 @@ class Document extends Structure
      *
      * @var array validator errors
      */
-    private $_errors;
+    private $_errors = array();
     
     /**
      *
      * @var array manually added validator errors
      */
-    private $_triggeredErors;
+    private $_triggeredErors = array();
     
     private $_eventDispatcher;
     
@@ -56,13 +62,13 @@ class Document extends Structure
      */
     private $_operator;
     
-    private $_behaviors;
+    private $_behaviors = array();
     
     public function __construct(Collection $collection, array $data = null)
     {
         $this->_collection = $collection;
         
-        $this->reset();
+        $this->_init();
         
         $this->beforeConstruct();
         
@@ -76,17 +82,28 @@ class Document extends Structure
         
     public function reset()
     {
+        // reset structure
         parent::reset();
         
-        $this->_eventDispatcher = new EventDispatcher;
-        $this->_operator        = new Operator;
+        // reset errors
         $this->_errors          = array();
         $this->_triggeredErors  = array();
         
-        $this->_behaviors       = array();
-        $this->attachBehaviors($this->behaviors());
+        // reset behaviors
+        $this->clearBehaviors();
+        
+        // init delegates
+        $this->_init();
         
         return $this;
+    }
+    
+    private function _init()
+    {
+        $this->_eventDispatcher = new EventDispatcher;
+        $this->_operator        = new Operator;
+        
+        $this->attachBehaviors($this->behaviors());
     }
     
     public function __toString()
@@ -104,6 +121,89 @@ class Document extends Structure
             
             return call_user_func_array(array($behavior, $name), $arguments);
         }
+    }
+    
+    public function __get($name)
+    {
+        $relations = $this->relations();
+        
+        if(isset($this->_resolvedRelations[$name])) {
+            // relation already resolved
+            return $this->_resolvedRelations[$name];
+        } elseif(isset($relations[$name])) {
+            // resolve relation
+            return $this->_resolveRelation($name);
+        } else {
+            // get document parameter
+            return parent::__get($name);
+        }
+    }
+    
+        
+    /**
+     * 
+     * @return array relation description
+     */
+    public function relations()
+    {
+        // [relationName => [relationType, targetCollection, reference], ...]
+        return array();
+    }
+
+    /**
+     * Load relation
+     * @param string $name name of relation
+     */
+    private function _resolveRelation($name)
+    {
+        $relations  = $this->relations();
+        $relation   = $relations[$name];
+        
+        $relationType           = $relation[0];
+        $targetCollectionName   = $relation[1];
+        
+        switch($relationType) {
+            case self::RELATION_HAS_ONE:
+                $sourceField = '_id';
+                $targetField = $relation[2];
+                
+                $this->_resolvedRelations[$name] = $this->_collection
+                    ->getDatabase()
+                    ->getCollection($targetCollectionName)
+                    ->find()
+                    ->where($targetField, $this->get($sourceField))
+                    ->findOne();
+                    
+                break;
+            
+            case self::RELATION_BELONGS:
+                $sourceField = $relation[2];
+                $targetField = '_id';
+                
+                $this->_resolvedRelations[$name] = $this->_collection
+                    ->getDatabase()
+                    ->getCollection($targetCollectionName)
+                    ->find()
+                    ->where($targetField, $this->get($sourceField))
+                    ->findOne();
+                
+                break;
+            
+            case self::RELATION_HAS_MANY:
+                $sourceField = '_id';
+                $targetField = $relation[2];
+                
+                $this->_resolvedRelations[$name] = $this->_collection
+                    ->getDatabase()
+                    ->getCollection($targetCollectionName)
+                    ->find()
+                    ->where($targetField, $this->get($sourceField))
+                    ->findAll();
+                
+                break;
+        }
+        
+        return $this->_resolvedRelations[$name];
     }
     
     public function triggerEvent($event)
@@ -389,7 +489,8 @@ class Document extends Structure
                         $isValidMX = true;
                         
                         if($isValidEmail && !empty($rule['mx'])) {
-                            $isValidMX =  checkdnsrr(explode('@', $value)[1], 'MX');
+                            list(, $host) = explode('@', $value);
+                            $isValidMX =  checkdnsrr($host, 'MX');
                         }
                         
                         if(!$isValidEmail || !$isValidMX) {
@@ -397,6 +498,32 @@ class Document extends Structure
                                 $rule['message'] = 'Value of field "' . $field . '" is not email in model ' . get_called_class();
                             }
                             
+                            $this->_errors[$field][$rule[1]] = $rule['message'];
+                        }
+                    }
+                    break;
+                    
+                default:
+                    
+                    foreach($fields as $field) {
+                        if(!$this->get($field)) {
+                            continue;
+                        }
+
+                        if(!method_exists($this, $rule[1])) {
+                            continue;
+                        }
+
+                        // params, passed to rule method
+                        $params = $rule;
+                        unset($params[0]); // remove field list
+                        unset($params[1]); // remove rule name
+                        
+                        if(!call_user_func(array($this, $rule[1]), $field, $params)) {
+                            if(!isset($rule['message'])) {
+                                $rule['message'] = 'Field "' . $field . '" not valid in model ' . get_called_class();
+                            }
+
                             $this->_errors[$field][$rule[1]] = $rule['message'];
                         }
                     }
@@ -414,7 +541,10 @@ class Document extends Structure
     public function validate()
     {
         if(!$this->isValid()) {
-            throw new \Sokil\Mongo\Document\Exception\Validate('Document not valid');
+            $exception = new \Sokil\Mongo\Document\Exception\Validate('Document not valid');
+            $exception->setDocument($this);
+            
+            throw $exception;
         }
     }
 
@@ -480,6 +610,12 @@ class Document extends Structure
         return $this;
     }
     
+    public function clearBehaviors()
+    {
+        $this->_behaviors = array();
+        return $this;
+    }
+    
     public function getOperator()
     {
         return $this->_operator;
@@ -508,14 +644,25 @@ class Document extends Structure
     {
         parent::unsetField($fieldName);
         
-        if($this->getId()) {
+        if($this->getId() && $this->has($fieldName)) {
             $this->_operator->unsetField($fieldName);
         }
         
         return $this;
     }
     
+    /**
+     * @deprecated use self::merge() instead
+     * @param array $data
+     * @return \Sokil\Mongo\Structure
+     */
     public function fromArray(array $data)
+    {
+        $this->merge($data);
+        return $this;
+    }
+    
+    public function merge(array $data)
     {        
         if($this->isStored()) {
             foreach($data as $fieldName => $value) {
@@ -523,7 +670,7 @@ class Document extends Structure
             }
         }
         else {
-            parent::fromArray($data);
+            parent::merge($data);
         }
         
         return $this;
